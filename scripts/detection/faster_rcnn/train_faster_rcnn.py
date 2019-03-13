@@ -171,6 +171,7 @@ class RCNNL1LossMetric(mx.metric.EvalMetric):
         self.sum_metric += loss.asscalar()
         self.num_inst += num_inst.asscalar()
 
+
 def get_dataset(dataset, args):
     if dataset.lower() == 'voc':
         train_dataset = gdata.VOCDetection(
@@ -189,6 +190,7 @@ def get_dataset(dataset, args):
         train_dataset = MixupDetection(train_dataset)
     return train_dataset, val_dataset, val_metric
 
+
 def get_dataloader(net, train_dataset, val_dataset, batch_size, num_workers):
     """Get dataloader."""
     train_bfn = batchify.Tuple(*[batchify.Append() for _ in range(5)])
@@ -200,6 +202,7 @@ def get_dataloader(net, train_dataset, val_dataset, batch_size, num_workers):
         val_dataset.transform(FasterRCNNDefaultValTransform(net.short, net.max_size)),
         batch_size, False, batchify_fn=val_bfn, last_batch='keep', num_workers=num_workers)
     return train_loader, val_loader
+
 
 def save_params(net, logger, best_map, current_map, epoch, save_interval, prefix):
     current_map = float(current_map)
@@ -215,6 +218,7 @@ def save_params(net, logger, best_map, current_map, epoch, save_interval, prefix
             epoch, '{:s}_{:04d}_{:.4f}.params'.format(prefix, epoch, current_map)))
         net.save_parameters('{:s}_{:04d}_{:.4f}.params'.format(prefix, epoch, current_map))
 
+
 def split_and_load(batch, ctx_list):
     """Split data to 1 batch each device."""
     num_ctx = len(ctx_list)
@@ -223,6 +227,7 @@ def split_and_load(batch, ctx_list):
         new_data = [x.as_in_context(ctx) for x, ctx in zip(data, ctx_list)]
         new_batch.append(new_data)
     return new_batch
+
 
 def validate(net, val_data, ctx, eval_metric):
     """Test on validation dataset."""
@@ -258,8 +263,10 @@ def validate(net, val_data, ctx, eval_metric):
             eval_metric.update(det_bbox, det_id, det_score, gt_bbox, gt_id, gt_diff)
     return eval_metric.get()
 
+
 def get_lr_at_iter(alpha):
     return 1. / 3. * (1 - alpha) + alpha
+
 
 def train(net, train_data, val_data, eval_metric, ctx, args):
     """Training pipeline"""
@@ -399,6 +406,7 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
         else:
             current_map = 0.
         save_params(net, logger, best_map, current_map, epoch, args.save_interval, args.save_prefix)
+
 
 if __name__ == '__main__':
     args = parse_args()
