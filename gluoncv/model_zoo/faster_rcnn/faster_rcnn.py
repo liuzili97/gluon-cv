@@ -3,6 +3,7 @@ from __future__ import absolute_import
 
 import os
 import warnings
+import numpy as np
 import mxnet as mx
 from mxnet import autograd
 from mxnet.gluon import nn
@@ -12,6 +13,7 @@ from ..rpn import RPN
 
 __all__ = ['FasterRCNN', 'get_faster_rcnn',
            'faster_rcnn_resnet50_v1b_voc',
+           'faster_rcnn_resnet18_v1b_coco',
            'faster_rcnn_resnet50_v1b_coco',
            'faster_rcnn_resnet50_v1b_custom',
            'faster_rcnn_resnet101_v1d_voc',
@@ -143,7 +145,7 @@ class FasterRCNN(RCNN):
                  rpn_train_pre_nms=12000, rpn_train_post_nms=2000,
                  rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,
                  num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=300,
-                 additional_output=False, **kwargs):
+                 additional_output=False, anchor_dtype=np.float32, **kwargs):
         super(FasterRCNN, self).__init__(
             features=features, top_features=top_features, classes=classes,
             short=short, max_size=max_size, train_patterns=train_patterns,
@@ -160,7 +162,7 @@ class FasterRCNN(RCNN):
                 scales=scales, ratios=ratios, alloc_size=alloc_size,
                 clip=clip, nms_thresh=rpn_nms_thresh, train_pre_nms=rpn_train_pre_nms,
                 train_post_nms=rpn_train_post_nms, test_pre_nms=rpn_test_pre_nms,
-                test_post_nms=rpn_test_post_nms, min_size=rpn_min_size)
+                test_post_nms=rpn_test_post_nms, min_size=rpn_min_size, anchor_dtype=anchor_dtype)
             self.sampler = RCNNTargetSampler(
                 num_image=self._max_batch, num_proposal=rpn_train_post_nms,
                 num_sample=num_sample, pos_iou_thresh=pos_iou_thresh,
@@ -397,6 +399,33 @@ def faster_rcnn_resnet50_v1b_voc(pretrained=False, pretrained_base=True, **kwarg
         ratios=(0.5, 1, 2), alloc_size=(128, 128), rpn_nms_thresh=0.7,
         rpn_train_pre_nms=12000, rpn_train_post_nms=2000,
         rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,
+        num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=100,
+        **kwargs)
+
+def faster_rcnn_resnet18_v1b_coco(pretrained=False, pretrained_base=True, **kwargs):
+    from ..resnetv1b import resnet18_v1b
+    from ...data import COCODetection
+    classes = COCODetection.CLASSES
+    pretrained_base = False if pretrained else pretrained_base
+    base_network = resnet18_v1b(pretrained=pretrained_base, dilated=False,
+                                use_global_stats=True, **kwargs)
+    features = nn.HybridSequential()
+    top_features = nn.HybridSequential()
+    for layer in ['conv1', 'bn1', 'relu', 'maxpool', 'layer1', 'layer2', 'layer3']:
+        features.add(getattr(base_network, layer))
+    for layer in ['layer4']:
+        top_features.add(getattr(base_network, layer))
+    train_patterns = '|'.join(['.*dense', '.*rpn', '.*down(2|3|4)_conv', '.*layers(2|3|4)_conv'])
+    return get_faster_rcnn(
+        name='resnet18_v1b', dataset='coco', pretrained=pretrained,
+        features=features, top_features=top_features, classes=classes,
+        short=800, max_size=1333, train_patterns=train_patterns,
+        nms_thresh=0.5, nms_topk=-1, post_nms=-1,
+        roi_mode='align', roi_size=(14, 14), stride=16, clip=4.42,
+        rpn_channel=1024, base_size=16, scales=(2, 4, 8, 16, 32),
+        ratios=(0.5, 1, 2), alloc_size=(128, 128), rpn_nms_thresh=0.7,
+        rpn_train_pre_nms=12000, rpn_train_post_nms=2000,
+        rpn_test_pre_nms=6000, rpn_test_post_nms=1000, rpn_min_size=0,
         num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=100,
         **kwargs)
 

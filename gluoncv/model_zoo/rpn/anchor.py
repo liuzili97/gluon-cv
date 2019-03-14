@@ -34,7 +34,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
         anchor map so we can skip re-generating anchors for each input.
 
     """
-    def __init__(self, stride, base_size, ratios, scales, alloc_size, **kwargs):
+    def __init__(self, stride, base_size, ratios, scales, alloc_size, dtype=np.float32, **kwargs):
         super(RPNAnchorGenerator, self).__init__(**kwargs)
         if not base_size:
             raise ValueError("Invalid base_size: {}.".format(base_size))
@@ -43,7 +43,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
         if not isinstance(scales, (tuple, list)):
             scales = [scales]
 
-        anchors = self._generate_anchors(stride, base_size, ratios, scales, alloc_size)
+        anchors = self._generate_anchors(stride, base_size, ratios, scales, alloc_size, dtype)
         self._num_depth = len(ratios) * len(scales)
         self.anchors = self.params.get_constant('anchor_', anchors)
 
@@ -52,7 +52,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
         """Number of anchors at each pixel."""
         return self._num_depth
 
-    def _generate_anchors(self, stride, base_size, ratios, scales, alloc_size):
+    def _generate_anchors(self, stride, base_size, ratios, scales, alloc_size, dtype):
         """Pre-generate all anchors."""
         # generate same shapes on every location
         px, py = (base_size - 1) * 0.5, (base_size - 1) * 0.5
@@ -75,7 +75,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
                             offset_x.ravel(), offset_y.ravel()), axis=1)
         # broadcast_add (1, N, 4) + (M, 1, 4)
         anchors = (base_sizes.reshape((1, -1, 4)) + offsets.reshape((-1, 1, 4)))
-        anchors = anchors.reshape((1, 1, height, width, -1)).astype(np.float32)
+        anchors = anchors.reshape((1, 1, height, width, -1)).astype(dtype)
         return anchors
 
     # pylint: disable=arguments-differ

@@ -4,6 +4,7 @@ from __future__ import division
 import os
 import numpy as np
 import mxnet as mx
+from tqdm import tqdm
 from .utils import try_import_pycocotools
 from ..base import VisionDataset
 from ...utils.bbox import bbox_xywh_to_xyxy, bbox_clip_xyxy
@@ -155,7 +156,8 @@ class COCODetection(VisionDataset):
 
             # iterate through the annotations
             image_ids = sorted(_coco.getImgIds())
-            for entry in _coco.loadImgs(image_ids):
+            imgs = _coco.loadImgs(image_ids)
+            for entry in tqdm(imgs):
                 abs_path = self._parse_image_path(entry)
                 if not os.path.exists(abs_path):
                     raise IOError('Image: {} not exists.'.format(abs_path))

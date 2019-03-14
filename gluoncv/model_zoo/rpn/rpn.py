@@ -1,6 +1,7 @@
 """Region Proposal Networks Definition."""
 from __future__ import absolute_import
 
+import numpy as np
 import mxnet as mx
 from mxnet import gluon
 from mxnet import autograd
@@ -56,12 +57,12 @@ class RPN(gluon.HybridBlock):
     """
     def __init__(self, channels, stride, base_size, scales, ratios, alloc_size,
                  clip, nms_thresh, train_pre_nms, train_post_nms,
-                 test_pre_nms, test_post_nms, min_size, **kwargs):
+                 test_pre_nms, test_post_nms, min_size, anchor_dtype=np.float32, **kwargs):
         super(RPN, self).__init__(**kwargs)
         weight_initializer = mx.init.Normal(0.01)
         with self.name_scope():
             self.anchor_generator = RPNAnchorGenerator(
-                stride, base_size, ratios, scales, alloc_size)
+                stride, base_size, ratios, scales, alloc_size, dtype=anchor_dtype)
             anchor_depth = self.anchor_generator.num_depth
             self.region_proposaler = RPNProposal(
                 clip, nms_thresh, train_pre_nms, train_post_nms,
