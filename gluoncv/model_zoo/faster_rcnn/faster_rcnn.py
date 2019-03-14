@@ -263,8 +263,14 @@ class FasterRCNN(RCNN):
         if self._roi_mode == 'pool':
             pooled_feat = F.ROIPooling(feat, rpn_roi, self._roi_size, 1. / self._stride)
         elif self._roi_mode == 'align':
+            if self._dtype == 'float16':
+                # Reduce time consumption of _backward_ROIAlign in FP16 for some reason.
+                feat = feat.astype('float32')
+                rpn_roi = rpn_roi.astype('float32')
             pooled_feat = F.contrib.ROIAlign(feat, rpn_roi, self._roi_size, 1. / self._stride,
                                              sample_ratio=2)
+            if self._dtype == 'float16':
+                pooled_feat = pooled_feat.astype(self._dtype)
         else:
             raise ValueError("Invalid roi mode: {}".format(self._roi_mode))
 

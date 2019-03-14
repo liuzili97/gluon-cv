@@ -11,6 +11,7 @@ from tqdm import tqdm
 from mxnet import nd
 from mxnet import gluon
 from mxnet import autograd
+from mxnet import profiler
 
 from utils import logger
 from utils.common import sec_to_time
@@ -36,6 +37,7 @@ def parse_args():
     parser.add_argument('--load', type=str, default='',
                         help='Resume from previously saved parameters if not None. '
                         'For example, you can resume from ./faster_rcnn_xxx_0123.params')
+    parser.add_argument('--profile', action='store_true', help="Add mx profile.")
     parser.add_argument('--config', nargs='+',
                         help="A list of KEY=VALUE to overwrite those defined in config.py")
     args = parser.parse_args()
@@ -270,8 +272,6 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
 
     best_map = [0]
     steps_per_epoch = cfg.TRAIN.STEPS_PER_EPOCH if cfg.TRAIN.STEPS_PER_EPOCH else len(train_data)
-    from mxnet import profiler
-    profiler.set_config(profile_all=True, aggregate_stats=True, filename='profile_output.json')
     for epoch in range(cfg.TRAIN.START_EPOCH, cfg.AUTO.END_EPOCH + 1):
         mix_ratio = 1.0
         if cfg.TRAIN.MODE_MIXUP:
@@ -294,7 +294,6 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
         btic = time.time()
         if epoch == cfg.TRAIN.START_EPOCH or (epoch - 1) % cfg.TRAIN.EVAL_INTERVAL == 0:
             net.hybridize(static_alloc=True)
-            pass
         base_lr = trainer.learning_rate
         tbar = tqdm(train_data, total=steps_per_epoch)
         tbar.set_description_str("[ TRAIN ]")
@@ -314,7 +313,9 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
             losses = []
             metric_losses = [[] for _ in metrics]
             add_losses = [[] for _ in metrics2]
-            if i == 2:
+            if args.profile and i == 10:
+                profiler.set_config(profile_all=True, aggregate_stats=True,
+                                    filename='profile_output.json')
                 profiler.set_state('run')
             with autograd.record():
                 for data, label, rpn_cls_targets, rpn_box_targets, rpn_box_masks in zip(*batch):
@@ -367,8 +368,9 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
                     for pred in records:
                         metric.update(pred[0], pred[1])
             trainer.step(batch_size)
-            mx.nd.waitall()
-            profiler.set_state('stop')
+            if args.profile:
+                mx.nd.waitall()
+                profiler.set_state('stop')
 
             # update metrics
             if cfg.GENERAL.LOG_INTERVAL and total_iter % cfg.GENERAL.LOG_INTERVAL == 0:
@@ -420,7 +422,8 @@ if __name__ == '__main__':
     logger.info("Config: ------------------------------------------\n" + \
             pprint.pformat(cfg.to_dict(), indent=1, width=100, compact=True))
 
-    net = get_model(net_name, pretrained_base=True, dtype='float16' if cfg.GENERAL.FP16 else 'float32')
+    net = get_model(net_name, pretrained_base=True,
+                    dtype='float16' if cfg.GENERAL.FP16 else 'float32')
     if cfg.GENERAL.FP16:
         net.cast('float16')
     if args.load.strip():
