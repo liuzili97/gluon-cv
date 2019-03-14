@@ -200,8 +200,9 @@ class BBoxClipToImage(gluon.HybridBlock):
     If multiple images are supplied and padded, must have additional inputs
     of accurate image shape.
     """
-    def __init__(self, **kwargs):
+    def __init__(self, dtype='float32', **kwargs):
         super(BBoxClipToImage, self).__init__(**kwargs)
+        self._dtype = dtype
 
     def hybrid_forward(self, F, x, img):
         """If images are padded, must have additional inputs for clipping
@@ -220,4 +221,4 @@ class BBoxClipToImage(gluon.HybridBlock):
         # window [B, 2] -> reverse hw -> tile [B, 4] -> [B, 1, 4], boxes [B, N, 4]
         window = F.shape_array(img).slice_axis(axis=0, begin=2, end=None).expand_dims(0)
         m = F.tile(F.reverse(window, axis=1), reps=(2,)).reshape((0, -4, 1, -1))
-        return F.broadcast_minimum(x, F.cast(m, dtype='float32'))
+        return F.broadcast_minimum(x, F.cast(m, dtype=self._dtype))

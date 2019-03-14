@@ -57,16 +57,16 @@ class RPN(gluon.HybridBlock):
     """
     def __init__(self, channels, stride, base_size, scales, ratios, alloc_size,
                  clip, nms_thresh, train_pre_nms, train_post_nms,
-                 test_pre_nms, test_post_nms, min_size, anchor_dtype=np.float32, **kwargs):
+                 test_pre_nms, test_post_nms, min_size, dtype='float32', **kwargs):
         super(RPN, self).__init__(**kwargs)
         weight_initializer = mx.init.Normal(0.01)
         with self.name_scope():
             self.anchor_generator = RPNAnchorGenerator(
-                stride, base_size, ratios, scales, alloc_size, dtype=anchor_dtype)
+                stride, base_size, ratios, scales, alloc_size)
             anchor_depth = self.anchor_generator.num_depth
             self.region_proposaler = RPNProposal(
                 clip, nms_thresh, train_pre_nms, train_post_nms,
-                test_pre_nms, test_post_nms, min_size, stds=(1., 1., 1., 1.))
+                test_pre_nms, test_post_nms, min_size, stds=(1., 1., 1., 1.), dtype=dtype)
             self.conv1 = nn.HybridSequential()
             self.conv1.add(nn.Conv2D(channels, 3, 1, 1, weight_initializer=weight_initializer))
             self.conv1.add(nn.Activation('relu'))

@@ -8,7 +8,7 @@ _C = config  # short alias to avoid coding
 
 _C.GENERAL.LOG_INTERVAL = 50
 _C.GENERAL.WORKER_NUM = 8
-_C.GENERAL.FP16 = True
+_C.GENERAL.FP16 = False
 _C.GENERAL.FP16_RESCALE_FACTOR = 128
 
 _C.BACKBONE.NAME = 'resnet50_v1b'

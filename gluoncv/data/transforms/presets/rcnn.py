@@ -140,6 +140,7 @@ class FasterRCNNDefaultTrainTransform(object):
         self._std = std
         self._anchors = None
         self._flip_p = flip_p
+        self._dtype = dtype
         if net is None:
             return
 
@@ -149,7 +150,7 @@ class FasterRCNNDefaultTrainTransform(object):
         anchor_generator = copy.deepcopy(net.rpn.anchor_generator)
         anchor_generator.collect_params().reset_ctx(None)
         anchors = anchor_generator(
-            mx.nd.zeros((1, 3, ashape, ashape), dtype=dtype)).reshape((1, 1, ashape, ashape, -1))
+            mx.nd.zeros((1, 3, ashape, ashape), dtype=self._dtype)).reshape((1, 1, ashape, ashape, -1))
         self._anchors = anchors
         # record feature extractor for infer_shape
         if not hasattr(net, 'features'):
@@ -184,7 +185,7 @@ class FasterRCNNDefaultTrainTransform(object):
         # feat_h, feat_w = (img.shape[1] // self._stride, img.shape[2] // self._stride)
         oshape = self._feat_sym.infer_shape(data=(1, 3, img.shape[1], img.shape[2]))[1][0]
         anchor = self._anchors[:, :, :oshape[2], :oshape[3], :].reshape((-1, 4))
-        gt_bboxes = mx.nd.array(bbox[:, :4])
+        gt_bboxes = mx.nd.array(bbox[:, :4], dtype=self._dtype)
         cls_target, box_target, box_mask = self._target_generator(
             gt_bboxes, anchor, img.shape[2], img.shape[1])
         return img, bbox.astype(img.dtype), cls_target, box_target, box_mask

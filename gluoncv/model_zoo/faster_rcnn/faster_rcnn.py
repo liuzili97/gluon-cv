@@ -145,7 +145,7 @@ class FasterRCNN(RCNN):
                  rpn_train_pre_nms=12000, rpn_train_post_nms=2000,
                  rpn_test_pre_nms=6000, rpn_test_post_nms=300, rpn_min_size=16,
                  num_sample=128, pos_iou_thresh=0.5, pos_ratio=0.25, max_num_gt=300,
-                 additional_output=False, anchor_dtype=np.float32, **kwargs):
+                 additional_output=False, dtype='float32', **kwargs):
         super(FasterRCNN, self).__init__(
             features=features, top_features=top_features, classes=classes,
             short=short, max_size=max_size, train_patterns=train_patterns,
@@ -154,19 +154,20 @@ class FasterRCNN(RCNN):
         self._max_batch = 1  # currently only support batch size = 1
         self._num_sample = num_sample
         self._rpn_test_post_nms = rpn_test_post_nms
-        self._target_generator = {RCNNTargetGenerator(self.num_class)}
+        self._target_generator = {RCNNTargetGenerator(self.num_class, dtype=dtype)}
         self._additional_output = additional_output
+        self._dtype = dtype
         with self.name_scope():
             self.rpn = RPN(
                 channels=rpn_channel, stride=stride, base_size=base_size,
                 scales=scales, ratios=ratios, alloc_size=alloc_size,
                 clip=clip, nms_thresh=rpn_nms_thresh, train_pre_nms=rpn_train_pre_nms,
                 train_post_nms=rpn_train_post_nms, test_pre_nms=rpn_test_pre_nms,
-                test_post_nms=rpn_test_post_nms, min_size=rpn_min_size, anchor_dtype=anchor_dtype)
+                test_post_nms=rpn_test_post_nms, min_size=rpn_min_size, dtype=dtype)
             self.sampler = RCNNTargetSampler(
                 num_image=self._max_batch, num_proposal=rpn_train_post_nms,
                 num_sample=num_sample, pos_iou_thresh=pos_iou_thresh,
-                pos_ratio=pos_ratio, max_num_gt=max_num_gt)
+                pos_ratio=pos_ratio, max_num_gt=max_num_gt, dtype=dtype)
 
     @property
     def target_generator(self):
@@ -236,6 +237,11 @@ class FasterRCNN(RCNN):
             else:
                 return [x]
 
+        if self._dtype == 'float16':
+            x = x.astype(self._dtype)
+            if autograd.is_training():
+                gt_box = gt_box.astype(self._dtype)
+
         feat = self.features(x)
         # RPN proposals
         if autograd.is_training():
@@ -244,17 +250,15 @@ class FasterRCNN(RCNN):
             rpn_box, samples, matches = self.sampler(rpn_box, rpn_score, gt_box)
         else:
             _, rpn_box = self.rpn(feat, F.zeros_like(x))
-
         # create batchid for roi
         num_roi = self._num_sample if autograd.is_training() else self._rpn_test_post_nms
         with autograd.pause():
             # roi_batchid = F.arange(0, self._max_batch, repeat=num_roi)
-            roi_batchid = F.arange(0, self._max_batch)
+            roi_batchid = F.arange(0, self._max_batch, dtype=self._dtype)
             roi_batchid = F.repeat(roi_batchid, num_roi)
             # remove batch dim because ROIPooling require 2d input
             rpn_roi = F.concat(*[roi_batchid.reshape((-1, 1)), rpn_box.reshape((-1, 4))], dim=-1)
             rpn_roi = F.stop_gradient(rpn_roi)
-
         # ROI features
         if self._roi_mode == 'pool':
             pooled_feat = F.ROIPooling(feat, rpn_roi, self._roi_size, 1. / self._stride)

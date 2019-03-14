@@ -137,7 +137,7 @@ def get_dataset(dataset, args):
             splits=[(2007, 'test')])
         val_metric = VOC07MApMetric(iou_thresh=0.5, class_names=val_dataset.classes)
     elif dataset.lower() == 'coco':
-        train_dataset = gdata.COCODetection(splits='instances_train2017', use_crowd=False)
+        train_dataset = gdata.COCODetection(splits='instances_val2017', use_crowd=False)
         val_dataset = gdata.COCODetection(splits='instances_val2017', skip_empty=False)
         val_metric = COCODetectionMetric(val_dataset, os.path.join(args.logdir, 'eval'), cleanup=True)
     else:
@@ -270,6 +270,8 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
 
     best_map = [0]
     steps_per_epoch = cfg.TRAIN.STEPS_PER_EPOCH if cfg.TRAIN.STEPS_PER_EPOCH else len(train_data)
+    from mxnet import profiler
+    profiler.set_config(profile_all=True, aggregate_stats=True, filename='profile_output.json')
     for epoch in range(cfg.TRAIN.START_EPOCH, cfg.AUTO.END_EPOCH + 1):
         mix_ratio = 1.0
         if cfg.TRAIN.MODE_MIXUP:
@@ -292,6 +294,7 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
         btic = time.time()
         if epoch == cfg.TRAIN.START_EPOCH or (epoch - 1) % cfg.TRAIN.EVAL_INTERVAL == 0:
             net.hybridize(static_alloc=True)
+            pass
         base_lr = trainer.learning_rate
         tbar = tqdm(train_data, total=steps_per_epoch)
         tbar.set_description_str("[ TRAIN ]")
@@ -311,28 +314,37 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
             losses = []
             metric_losses = [[] for _ in metrics]
             add_losses = [[] for _ in metrics2]
+            if i == 2:
+                profiler.set_state('run')
             with autograd.record():
                 for data, label, rpn_cls_targets, rpn_box_targets, rpn_box_masks in zip(*batch):
                     gt_label = label[:, :, 4:5]
                     gt_box = label[:, :, :4]
-                    if cfg.GENERAL.FP16:
-                        data = data.astype('float16')
                     cls_pred, box_pred, roi, samples, matches, rpn_score, rpn_box, anchors = net(data, gt_box)
-                    if cfg.GENERAL.FP16:
-                        cls_pred = cls_pred.astype('float32', copy=False)
-                        box_pred = box_pred.astype('float32', copy=False)
-                        rpn_score = rpn_score.astype('float32', copy=False)
-                        rpn_box = rpn_box.astype('float32', copy=False)
+
                     # losses of rpn
+                    if cfg.GENERAL.FP16:
+                        rpn_score = rpn_score.astype('float32')
+                        rpn_box = rpn_box.astype('float32')
+                        rpn_cls_targets = rpn_cls_targets.astype('float32')
+                        rpn_box_targets = rpn_box_targets.astype('float32')
+                        rpn_box_masks = rpn_box_masks.astype('float32')
                     rpn_score = rpn_score.squeeze(axis=-1)
                     num_rpn_pos = (rpn_cls_targets >= 0).sum()
                     rpn_loss1 = rpn_cls_loss(rpn_score, rpn_cls_targets, rpn_cls_targets >= 0) * rpn_cls_targets.size / num_rpn_pos
                     rpn_loss2 = rpn_box_loss(rpn_box, rpn_box_targets, rpn_box_masks) * rpn_box.size / num_rpn_pos
                     # rpn overall loss, use sum rather than average
                     rpn_loss = rpn_loss1 + rpn_loss2
+
                     # generate targets for rcnn
                     cls_targets, box_targets, box_masks = net.target_generator(roi, samples, matches, gt_label, gt_box)
                     # losses of rcnn
+                    if cfg.GENERAL.FP16:
+                        cls_pred = cls_pred.astype('float32')
+                        box_pred = box_pred.astype('float32')
+                        cls_targets = cls_targets.astype('float32')
+                        box_targets = box_targets.astype('float32')
+                        box_masks = box_masks.astype('float32')
                     num_rcnn_pos = (cls_targets >= 0).sum()
                     rcnn_loss1 = rcnn_cls_loss(cls_pred, cls_targets, cls_targets >= 0) * cls_targets.size / cls_targets.shape[0] / num_rcnn_pos
                     rcnn_loss2 = rcnn_box_loss(box_pred, box_targets, box_masks) * box_pred.size / box_pred.shape[0] / num_rcnn_pos
@@ -355,6 +367,8 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
                     for pred in records:
                         metric.update(pred[0], pred[1])
             trainer.step(batch_size)
+            mx.nd.waitall()
+            profiler.set_state('stop')
 
             # update metrics
             if cfg.GENERAL.LOG_INTERVAL and total_iter % cfg.GENERAL.LOG_INTERVAL == 0:
@@ -406,8 +420,7 @@ if __name__ == '__main__':
     logger.info("Config: ------------------------------------------\n" + \
             pprint.pformat(cfg.to_dict(), indent=1, width=100, compact=True))
 
-    net = get_model(net_name, pretrained_base=True,
-                    anchor_dtype=np.float16 if cfg.GENERAL.FP16 else np.float32)
+    net = get_model(net_name, pretrained_base=True, dtype='float16' if cfg.GENERAL.FP16 else 'float32')
     if cfg.GENERAL.FP16:
         net.cast('float16')
     if args.load.strip():
