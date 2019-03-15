@@ -212,6 +212,7 @@ class FasterRCNNDefaultValTransform(object):
         self._std = std
         self._short = short
         self._max_size = max_size
+        self._dtype = dtype
 
     def __call__(self, src, label):
         """Apply transform to validation image/label."""
@@ -224,7 +225,7 @@ class FasterRCNNDefaultValTransform(object):
 
         img = mx.nd.image.to_tensor(img)
         img = mx.nd.image.normalize(img, mean=self._mean, std=self._std)
-        return img, bbox.astype(dtype), mx.nd.array([im_scale])
+        return img, bbox.astype(self._dtype), mx.nd.array([im_scale])
 
 
 class MaskRCNNDefaultTrainTransform(object):

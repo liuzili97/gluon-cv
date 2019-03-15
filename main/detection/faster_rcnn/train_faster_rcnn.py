@@ -139,7 +139,7 @@ def get_dataset(dataset, args):
             splits=[(2007, 'test')])
         val_metric = VOC07MApMetric(iou_thresh=0.5, class_names=val_dataset.classes)
     elif dataset.lower() == 'coco':
-        train_dataset = gdata.COCODetection(splits='instances_val2017', use_crowd=False)
+        train_dataset = gdata.COCODetection(splits='instances_train2017', use_crowd=False)
         val_dataset = gdata.COCODetection(splits='instances_val2017', skip_empty=False)
         val_metric = COCODetectionMetric(val_dataset, os.path.join(args.logdir, 'eval'), cleanup=True)
     else:
@@ -159,10 +159,10 @@ def get_dataloader(net, train_dataset, val_dataset, batch_size, num_workers):
     val_dataset = val_dataset.transform(FasterRCNNDefaultValTransform(net.short, net.max_size, dtype=dtype))
     train_loader = mx.gluon.data.DataLoader(
         train_dataset, batch_size, True,
-        batchify_fn=train_bfn, last_batch='rollover', num_workers=num_workers)
+        batchify_fn=train_bfn, last_batch='rollover', num_workers=num_workers, thread_pool=True)
     val_loader = mx.gluon.data.DataLoader(
         val_dataset, batch_size, False,
-        batchify_fn=val_bfn, last_batch='keep', num_workers=num_workers)
+        batchify_fn=val_bfn, last_batch='keep', num_workers=num_workers, thread_pool=True)
     return train_loader, val_loader
 
 
