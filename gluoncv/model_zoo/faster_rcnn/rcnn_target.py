@@ -28,7 +28,8 @@ class RCNNTargetSampler(gluon.HybridBlock):
         necessarily very precise. However, using a very big number may impact the training speed.
 
     """
-    def __init__(self, num_image, num_proposal, num_sample, pos_iou_thresh, pos_ratio, max_num_gt):
+    def __init__(self, num_image, num_proposal, num_sample, pos_iou_thresh, pos_ratio, max_num_gt,
+                 dtype='float32'):
         super(RCNNTargetSampler, self).__init__()
         self._num_image = num_image
         self._num_proposal = num_proposal
@@ -36,6 +37,7 @@ class RCNNTargetSampler(gluon.HybridBlock):
         self._max_pos = int(round(num_sample * pos_ratio))
         self._pos_iou_thresh = pos_iou_thresh
         self._max_num_gt = max_num_gt
+        self._dtype = dtype
 
     #pylint: disable=arguments-differ
     def hybrid_forward(self, F, rois, scores, gt_boxes):
@@ -83,14 +85,15 @@ class RCNNTargetSampler(gluon.HybridBlock):
                 mask = F.where(pos_mask, F.ones_like(mask) * 3, mask)
 
                 # shuffle mask
-                rand = F.random.uniform(0, 1, shape=(self._num_proposal + self._max_num_gt,))
+                rand = F.random.uniform(0, 1, shape=(self._num_proposal + self._max_num_gt,),
+                                        dtype=self._dtype)
                 rand = F.slice_like(rand, ious_argmax)
-                index = F.argsort(rand)
+                index = F.argsort(rand.astype('float32')).astype(self._dtype)
                 mask = F.take(mask, index)
                 ious_argmax = F.take(ious_argmax, index)
 
                 # sample pos samples
-                order = F.argsort(mask, is_ascend=False)
+                order = F.argsort(mask.astype('float32'), is_ascend=False).astype(self._dtype)
                 topk = F.slice_axis(order, axis=0, begin=0, end=self._max_pos)
                 topk_indices = F.take(index, topk)
                 topk_samples = F.take(mask, topk)
@@ -107,7 +110,7 @@ class RCNNTargetSampler(gluon.HybridBlock):
                 ious_argmax = F.slice_axis(ious_argmax, axis=0, begin=self._max_pos, end=None)
                 # change mask: 4 neg 3 pos 0 ignore
                 mask = F.where(mask == 2, F.ones_like(mask) * 4, mask)
-                order = F.argsort(mask, is_ascend=False)
+                order = F.argsort(mask.astype('float32'), is_ascend=False).astype(self._dtype)
                 num_neg = self._num_sample - self._max_pos
                 bottomk = F.slice_axis(order, axis=0, begin=0, end=num_neg)
                 bottomk_indices = F.take(index, bottomk)
@@ -147,11 +150,12 @@ class RCNNTargetGenerator(gluon.Block):
         Standard deviations to be divided from regression targets.
 
     """
-    def __init__(self, num_class, means=(0., 0., 0., 0.), stds=(.1, .1, .2, .2)):
+    def __init__(self, num_class, means=(0., 0., 0., 0.), stds=(.1, .1, .2, .2), dtype='float32'):
         super(RCNNTargetGenerator, self).__init__()
         self._cls_encoder = MultiClassEncoder()
         self._box_encoder = NormalizedPerClassBoxCenterEncoder(
             num_class=num_class, means=means, stds=stds)
+        self._dtype = dtype
 
     #pylint: disable=arguments-differ
     def forward(self, roi, samples, matches, gt_label, gt_box):
@@ -173,6 +177,9 @@ class RCNNTargetGenerator(gluon.Block):
 
         """
         with autograd.pause():
+            if self._dtype == 'float16':
+                gt_label = gt_label.astype(self._dtype)
+                gt_box = gt_box.astype(self._dtype)
             # cls_target (B, N)
             cls_target = self._cls_encoder(samples, matches, gt_label)
             # box_target, box_weight (C, B, N, 4)

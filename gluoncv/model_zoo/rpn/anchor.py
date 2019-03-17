@@ -75,7 +75,7 @@ class RPNAnchorGenerator(gluon.HybridBlock):
                             offset_x.ravel(), offset_y.ravel()), axis=1)
         # broadcast_add (1, N, 4) + (M, 1, 4)
         anchors = (base_sizes.reshape((1, -1, 4)) + offsets.reshape((-1, 1, 4)))
-        anchors = anchors.reshape((1, 1, height, width, -1)).astype(np.float32)
+        anchors = anchors.reshape((1, 1, height, width, -1))
         return anchors
 
     # pylint: disable=arguments-differ

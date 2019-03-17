@@ -133,13 +133,14 @@ class FasterRCNNDefaultTrainTransform(object):
     def __init__(self, short=600, max_size=1000, net=None, mean=(0.485, 0.456, 0.406),
                  std=(0.229, 0.224, 0.225), box_norm=(1., 1., 1., 1.),
                  num_sample=256, pos_iou_thresh=0.7, neg_iou_thresh=0.3,
-                 pos_ratio=0.5, flip_p=0.5, **kwargs):
+                 pos_ratio=0.5, flip_p=0.5, dtype='float32', **kwargs):
         self._short = short
         self._max_size = max_size
         self._mean = mean
         self._std = std
         self._anchors = None
         self._flip_p = flip_p
+        self._dtype = dtype
         if net is None:
             return
 
@@ -149,7 +150,7 @@ class FasterRCNNDefaultTrainTransform(object):
         anchor_generator = copy.deepcopy(net.rpn.anchor_generator)
         anchor_generator.collect_params().reset_ctx(None)
         anchors = anchor_generator(
-            mx.nd.zeros((1, 3, ashape, ashape))).reshape((1, 1, ashape, ashape, -1))
+            mx.nd.zeros((1, 3, ashape, ashape), dtype=self._dtype)).reshape((1, 1, ashape, ashape, -1))
         self._anchors = anchors
         # record feature extractor for infer_shape
         if not hasattr(net, 'features'):
@@ -184,7 +185,7 @@ class FasterRCNNDefaultTrainTransform(object):
         # feat_h, feat_w = (img.shape[1] // self._stride, img.shape[2] // self._stride)
         oshape = self._feat_sym.infer_shape(data=(1, 3, img.shape[1], img.shape[2]))[1][0]
         anchor = self._anchors[:, :, :oshape[2], :oshape[3], :].reshape((-1, 4))
-        gt_bboxes = mx.nd.array(bbox[:, :4])
+        gt_bboxes = mx.nd.array(bbox[:, :4], dtype=self._dtype)
         cls_target, box_target, box_mask = self._target_generator(
             gt_bboxes, anchor, img.shape[2], img.shape[1])
         return img, bbox.astype(img.dtype), cls_target, box_target, box_mask
@@ -206,11 +207,12 @@ class FasterRCNNDefaultValTransform(object):
 
     """
     def __init__(self, short=600, max_size=1000,
-                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)):
+                 mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225), dtype='float32'):
         self._mean = mean
         self._std = std
         self._short = short
         self._max_size = max_size
+        self._dtype = dtype
 
     def __call__(self, src, label):
         """Apply transform to validation image/label."""
@@ -223,7 +225,7 @@ class FasterRCNNDefaultValTransform(object):
 
         img = mx.nd.image.to_tensor(img)
         img = mx.nd.image.normalize(img, mean=self._mean, std=self._std)
-        return img, bbox.astype('float32'), mx.nd.array([im_scale])
+        return img, bbox.astype(self._dtype), mx.nd.array([im_scale])
 
 
 class MaskRCNNDefaultTrainTransform(object):
