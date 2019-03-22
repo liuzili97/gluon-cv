@@ -24,7 +24,7 @@ _C.TRAIN.LR_SCHEDULE = [120000, 160000, 180000]  # "1x" schedule in detectron
 # Longer schedules for from-scratch training (https://arxiv.org/abs/1811.08883):
 # _C.TRAIN.LR_SCHEDULE = [960000, 1040000, 1080000]    # "6x" schedule in detectron
 # _C.TRAIN.LR_SCHEDULE = [1500000, 1580000, 1620000]   # "9x" schedule in detectron
-_C.TRAIN.NO_MIXUP_SCHEDULE = 160000
+_C.TRAIN.NO_MIXUP_SCHEDULE = 170000
 _C.TRAIN.BASE_LR = 0.00125
 _C.TRAIN.LR_DECAY_FACTOR = 0.1
 _C.TRAIN.LR_WARMUP = 8000
