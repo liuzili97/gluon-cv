@@ -38,8 +38,7 @@ def mkdir_p(dirname):
     try:
         os.makedirs(dirname)
     except OSError as e:
-        if e.errno != errno.EEXIST:
-            raise e
+        pass
 
 
 class _MyFormatter(logging.Formatter):
