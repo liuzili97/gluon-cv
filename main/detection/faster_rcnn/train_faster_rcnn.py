@@ -1,6 +1,7 @@
 """Train Faster-RCNN end to end."""
 import argparse
 import os
+
 # disable autotune
 os.environ['MXNET_CUDNN_AUTOTUNE_DEFAULT'] = '0'
 import time
@@ -8,6 +9,7 @@ import pprint
 import numpy as np
 import mxnet as mx
 from tqdm import tqdm
+from itertools import islice
 from mxnet import nd
 from mxnet import gluon
 from mxnet import autograd
@@ -36,7 +38,7 @@ def parse_args():
                         help='Saving parameter dir')
     parser.add_argument('--load', type=str, default='',
                         help='Resume from previously saved parameters if not None. '
-                        'For example, you can resume from ./faster_rcnn_xxx_0123.params')
+                             'For example, you can resume from ./faster_rcnn_xxx_0123.params')
     parser.add_argument('--profile', action='store_true', help="Add mx profile.")
     parser.add_argument('--config', nargs='+',
                         help="A list of KEY=VALUE to overwrite those defined in config.py")
@@ -87,7 +89,8 @@ class RPNL1LossMetric(mx.metric.EvalMetric):
         num_inst = mx.nd.sum(rpn_bbox_weight) / 4
 
         # calculate smooth_l1
-        loss = mx.nd.sum(rpn_bbox_weight * mx.nd.smooth_l1(rpn_bbox_reg - rpn_bbox_target, scalar=3))
+        loss = mx.nd.sum(
+            rpn_bbox_weight * mx.nd.smooth_l1(rpn_bbox_reg - rpn_bbox_target, scalar=3))
 
         self.sum_metric += loss.asscalar()
         self.num_inst += num_inst.asscalar()
@@ -125,7 +128,8 @@ class RCNNL1LossMetric(mx.metric.EvalMetric):
         num_inst = mx.nd.sum(rcnn_bbox_weight) / 4
 
         # calculate smooth_l1
-        loss = mx.nd.sum(rcnn_bbox_weight * mx.nd.smooth_l1(rcnn_bbox_reg - rcnn_bbox_target, scalar=1))
+        loss = mx.nd.sum(
+            rcnn_bbox_weight * mx.nd.smooth_l1(rcnn_bbox_reg - rcnn_bbox_target, scalar=1))
 
         self.sum_metric += loss.asscalar()
         self.num_inst += num_inst.asscalar()
@@ -141,11 +145,12 @@ def get_dataset(dataset, args):
     elif dataset.lower() == 'coco':
         train_dataset = gdata.COCODetection(splits='instances_train2017', use_crowd=False)
         val_dataset = gdata.COCODetection(splits='instances_val2017', skip_empty=False)
-        val_metric = COCODetectionMetric(val_dataset, os.path.join(args.logdir, 'eval'), cleanup=True)
+        val_metric = COCODetectionMetric(val_dataset, os.path.join(args.logdir, 'eval'),
+                                         cleanup=True)
     else:
         raise NotImplementedError('Dataset: {} not implemented.'.format(dataset))
     if cfg.TRAIN.MODE_MIXUP:
-        from gluoncv.data.mixup import MixupDetection
+        from gluoncv.data import MixupDetection
         train_dataset = MixupDetection(train_dataset)
     return train_dataset, val_dataset, val_metric
 
@@ -155,14 +160,16 @@ def get_dataloader(net, train_dataset, val_dataset, batch_size, num_workers):
     train_bfn = batchify.Tuple(*[batchify.Append() for _ in range(5)])
     val_bfn = batchify.Tuple(*[batchify.Append() for _ in range(3)])
     dtype = 'float16' if cfg.GENERAL.FP16 else 'float32'
-    train_dataset = train_dataset.transform(FasterRCNNDefaultTrainTransform(net.short, net.max_size, net, dtype=dtype))
-    val_dataset = val_dataset.transform(FasterRCNNDefaultValTransform(net.short, net.max_size, dtype=dtype))
+    train_dataset = train_dataset.transform(
+        FasterRCNNDefaultTrainTransform(net.short, net.max_size, net, dtype=dtype))
+    val_dataset = val_dataset.transform(
+        FasterRCNNDefaultValTransform(net.short, net.max_size, dtype=dtype))
     train_loader = mx.gluon.data.DataLoader(
         train_dataset, batch_size, True,
-        batchify_fn=train_bfn, last_batch='rollover', num_workers=num_workers, thread_pool=True)
+        batchify_fn=train_bfn, last_batch='rollover', num_workers=num_workers)
     val_loader = mx.gluon.data.DataLoader(
         val_dataset, batch_size, False,
-        batchify_fn=val_bfn, last_batch='keep', num_workers=num_workers, thread_pool=True)
+        batchify_fn=val_bfn, last_batch='keep', num_workers=num_workers)
     return train_loader, val_loader
 
 
@@ -171,7 +178,7 @@ def save_params(net, logger, best_map, current_map, epoch, save_interval, prefix
     if current_map > best_map[0]:
         best_save_prefix = os.path.join(prefix, 'best')
         logger.info('[Epoch {}] mAP {} higher than current best {} saving to {}'.format(
-                    epoch, current_map, best_map, '{:s}.params'.format(best_save_prefix)))
+            epoch, current_map, best_map, '{:s}.params'.format(best_save_prefix)))
         best_map[0] = current_map
         net.save_parameters('{:s}.params'.format(best_save_prefix))
         with open(best_save_prefix + '_map.log', 'a') as f:
@@ -196,12 +203,11 @@ def split_and_load(batch, ctx_list):
 
 def validate(net, val_data, ctx, eval_metric):
     """Test on validation dataset."""
-    clipper = gcv.nn.bbox.BBoxClipToImage()
+    clipper = gcv.nn.bbox.BBoxClipToImage(dtype='float16')
     eval_metric.reset()
     net.hybridize(static_alloc=True)
-    tbar = tqdm(val_data)
-    tbar.set_description_str("[ EVAL  ]")
-    for batch in tbar:
+    # tbar.set_description_str("[ EVAL  ]")
+    for batch in tqdm(val_data):
         batch = split_and_load(batch, ctx_list=ctx)
         det_bboxes = []
         det_ids = []
@@ -226,7 +232,9 @@ def validate(net, val_data, ctx, eval_metric):
             gt_difficults.append(y.slice_axis(axis=-1, begin=5, end=6) if y.shape[-1] > 5 else None)
 
         # update metric
-        for det_bbox, det_id, det_score, gt_bbox, gt_id, gt_diff in zip(det_bboxes, det_ids, det_scores, gt_bboxes, gt_ids, gt_difficults):
+        for det_bbox, det_id, det_score, gt_bbox, gt_id, gt_diff in zip(det_bboxes, det_ids,
+                                                                        det_scores, gt_bboxes,
+                                                                        gt_ids, gt_difficults):
             eval_metric.update(det_bbox, det_id, det_score, gt_bbox, gt_id, gt_diff)
     return eval_metric.get()
 
@@ -240,33 +248,39 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
     net.collect_params().setattr('grad_req', 'null')
     net.collect_train_params().setattr('grad_req', 'write')
     rescale_factor = float(cfg.GENERAL.FP16_RESCALE_FACTOR) if cfg.GENERAL.FP16 else None
+
+    # TODO(zhreshold) losses?
+    rpn_cls_loss = mx.gluon.loss.SigmoidBinaryCrossEntropyLoss(from_sigmoid=False,
+                                                               weight=rescale_factor)
+    rpn_box_loss = mx.gluon.loss.HuberLoss(rho=1 / 9., weight=rescale_factor)  # i.e. smoothl1
+    rcnn_cls_loss = mx.gluon.loss.SoftmaxCrossEntropyLoss(weight=rescale_factor)
+    rcnn_box_loss = mx.gluon.loss.HuberLoss(weight=rescale_factor)  # i.e. smoothl1
+    rescale_factor = 1.0 if rescale_factor is None else rescale_factor
+
     trainer = gluon.Trainer(
         net.collect_train_params(),  # fix batchnorm, fix first stage, etc...
         'sgd', {'learning_rate': cfg.TRAIN.BASE_LR, 'wd': cfg.TRAIN.WEIGHT_DECAY,
-                'momentum': cfg.TRAIN.MOMENTUM, 'clip_gradient': 5,
+                'momentum': cfg.TRAIN.MOMENTUM, 'clip_gradient': None,
                 'multi_precision': cfg.GENERAL.FP16,
-                'rescale_grad': 1.0 / cfg.GENERAL.FP16_RESCALE_FACTOR if cfg.GENERAL.FP16 else 1.0})
+                'rescale_grad': 1.0 / rescale_factor})
 
     # lr decay policy
     lr_steps = cfg.AUTO.LR_DECAY_EPOCH
     lr_warmup = float(cfg.TRAIN.LR_WARMUP)  # avoid int division
 
-    # TODO(zhreshold) losses?
-    rpn_cls_loss = mx.gluon.loss.SigmoidBinaryCrossEntropyLoss(from_sigmoid=False, weight=rescale_factor)
-    rpn_box_loss = mx.gluon.loss.HuberLoss(rho=1/9., weight=rescale_factor)  # i.e. smoothl1
-    rcnn_cls_loss = mx.gluon.loss.SoftmaxCrossEntropyLoss(weight=rescale_factor)
-    rcnn_box_loss = mx.gluon.loss.HuberLoss(weight=rescale_factor)  # i.e. smoothl1
     metrics = [mx.metric.Loss('RPN_Conf'),
                mx.metric.Loss('RPN_SmoothL1'),
                mx.metric.Loss('RCNN_CrossEntropy'),
-               mx.metric.Loss('RCNN_SmoothL1'),]
+               mx.metric.Loss('RCNN_SmoothL1'), ]
     metrics2 = [RPNAccMetric(), RPNL1LossMetric(), RCNNAccMetric(), RCNNL1LossMetric()]
 
     logger.info("Trainable parameters: ------------------------------------------\n" + \
-            pprint.pformat(net.collect_train_params().keys(), indent=1, width=100, compact=True))
+                pprint.pformat(net.collect_train_params().keys(), indent=1, width=100,
+                               compact=True))
     logger.info('LR Schedule [Epochs {} - {}].'.format(
         cfg.AUTO.LR_DECAY_EPOCH,
-        [cfg.TRAIN.BASE_LR * cfg.TRAIN.LR_DECAY_FACTOR ** i for i in range(len(cfg.AUTO.LR_DECAY_EPOCH))]))
+        [cfg.TRAIN.BASE_LR * cfg.TRAIN.LR_DECAY_FACTOR ** i for i in
+         range(len(cfg.AUTO.LR_DECAY_EPOCH))]))
     logger.info('Start training from [Epoch {}] to [Epoch {}].'.format(
         cfg.TRAIN.START_EPOCH, cfg.AUTO.END_EPOCH))
 
@@ -276,10 +290,10 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
         mix_ratio = 1.0
         if cfg.TRAIN.MODE_MIXUP:
             # TODO(zhreshold) only support evenly mixup now, target generator needs to be modified otherwise
-            train_data._dataset.set_mixup(np.random.uniform, 0.5, 0.5)
+            train_data._dataset._data.set_mixup(np.random.uniform, 0.5, 0.5)
             mix_ratio = 0.5
             if epoch >= (cfg.AUTO.END_EPOCH + 1) - cfg.AUTO.NO_MIXUP_EPOCH:
-                train_data._dataset.set_mixup(None)
+                train_data._dataset._data.set_mixup(None)
                 mix_ratio = 1.0
         if lr_steps and epoch >= lr_steps[0]:
             while lr_steps and epoch >= lr_steps[0]:
@@ -295,9 +309,10 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
         if epoch == cfg.TRAIN.START_EPOCH or (epoch - 1) % cfg.TRAIN.EVAL_INTERVAL == 0:
             net.hybridize(static_alloc=True)
         base_lr = trainer.learning_rate
-        tbar = tqdm(train_data, total=steps_per_epoch)
-        tbar.set_description_str("[ TRAIN ]")
-        for i, batch in enumerate(tbar):
+
+        # tbar.set_description_str("[ TRAIN ]")
+        for i, batch in enumerate(
+                tqdm(islice(train_data, 0, steps_per_epoch), total=steps_per_epoch)):
             i += 1
             total_iter = (epoch - 1) * steps_per_epoch + i
             if total_iter <= lr_warmup:
@@ -321,7 +336,8 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
                 for data, label, rpn_cls_targets, rpn_box_targets, rpn_box_masks in zip(*batch):
                     gt_label = label[:, :, 4:5]
                     gt_box = label[:, :, :4]
-                    cls_pred, box_pred, roi, samples, matches, rpn_score, rpn_box, anchors = net(data, gt_box)
+                    cls_pred, box_pred, roi, samples, matches, rpn_score, rpn_box, anchors = net(
+                        data, gt_box)
 
                     # losses of rpn
                     if cfg.GENERAL.FP16:
@@ -332,13 +348,16 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
                         rpn_box_masks = rpn_box_masks.astype('float32')
                     rpn_score = rpn_score.squeeze(axis=-1)
                     num_rpn_pos = (rpn_cls_targets >= 0).sum()
-                    rpn_loss1 = rpn_cls_loss(rpn_score, rpn_cls_targets, rpn_cls_targets >= 0) * rpn_cls_targets.size / num_rpn_pos
-                    rpn_loss2 = rpn_box_loss(rpn_box, rpn_box_targets, rpn_box_masks) * rpn_box.size / num_rpn_pos
+                    rpn_loss1 = rpn_cls_loss(rpn_score, rpn_cls_targets,
+                                             rpn_cls_targets >= 0) * rpn_cls_targets.size / num_rpn_pos
+                    rpn_loss2 = rpn_box_loss(rpn_box, rpn_box_targets,
+                                             rpn_box_masks) * rpn_box.size / num_rpn_pos
                     # rpn overall loss, use sum rather than average
                     rpn_loss = rpn_loss1 + rpn_loss2
 
                     # generate targets for rcnn
-                    cls_targets, box_targets, box_masks = net.target_generator(roi, samples, matches, gt_label, gt_box)
+                    cls_targets, box_targets, box_masks = net.target_generator(
+                        roi, samples, matches, gt_label, gt_box)
                     # losses of rcnn
                     if cfg.GENERAL.FP16:
                         cls_pred = cls_pred.astype('float32')
@@ -347,16 +366,20 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
                         box_targets = box_targets.astype('float32')
                         box_masks = box_masks.astype('float32')
                     num_rcnn_pos = (cls_targets >= 0).sum()
-                    rcnn_loss1 = rcnn_cls_loss(cls_pred, cls_targets, cls_targets >= 0) * cls_targets.size / cls_targets.shape[0] / num_rcnn_pos
-                    rcnn_loss2 = rcnn_box_loss(box_pred, box_targets, box_masks) * box_pred.size / box_pred.shape[0] / num_rcnn_pos
+                    rcnn_loss1 = rcnn_cls_loss(cls_pred, cls_targets,
+                                               cls_targets >= 0) * cls_targets.size / \
+                                 cls_targets.shape[0] / num_rcnn_pos
+                    rcnn_loss2 = rcnn_box_loss(box_pred, box_targets, box_masks) * box_pred.size / \
+                                 box_pred.shape[0] / num_rcnn_pos
                     rcnn_loss = rcnn_loss1 + rcnn_loss2
+
                     # overall losses
                     losses.append(rpn_loss.sum() * mix_ratio + rcnn_loss.sum() * mix_ratio)
-                    metric_losses[0].append(rpn_loss1.sum() * mix_ratio)
-                    metric_losses[1].append(rpn_loss2.sum() * mix_ratio)
-                    metric_losses[2].append(rcnn_loss1.sum() * mix_ratio)
-                    metric_losses[3].append(rcnn_loss2.sum() * mix_ratio)
-                    add_losses[0].append([[rpn_cls_targets, rpn_cls_targets>=0], [rpn_score]])
+                    metric_losses[0].append(rpn_loss1.sum() * mix_ratio / rescale_factor)
+                    metric_losses[1].append(rpn_loss2.sum() * mix_ratio / rescale_factor)
+                    metric_losses[2].append(rcnn_loss1.sum() * mix_ratio / rescale_factor)
+                    metric_losses[3].append(rcnn_loss2.sum() * mix_ratio / rescale_factor)
+                    add_losses[0].append([[rpn_cls_targets, rpn_cls_targets >= 0], [rpn_score]])
                     add_losses[1].append([[rpn_box_targets, rpn_box_masks], [rpn_box]])
                     add_losses[2].append([[cls_targets], [cls_pred]])
                     add_losses[3].append([[box_targets, box_masks], [box_pred]])
@@ -378,16 +401,18 @@ def train(net, train_data, val_data, eval_metric, ctx, args):
                 total_speed = cfg.GENERAL.LOG_INTERVAL * batch_size / (time.time() - btic)
                 speed = total_speed / batch_size  # batch size rely on the gpu num.
                 epoch_time_left = (steps_per_epoch - i + 1) / speed
-                total_time_left = ((cfg.AUTO.END_EPOCH - epoch) * steps_per_epoch  - i + 1) / speed
+                total_time_left = ((cfg.AUTO.END_EPOCH - epoch) * steps_per_epoch - i + 1) / speed
                 epoch_tl_h, epoch_tl_m, epoch_tl_s = sec_to_time(epoch_time_left)
                 total_tl_h, total_tl_m, _ = sec_to_time(total_time_left)
-                tqdm.write('[Epoch {}][Batch {}], {:.3f}/{:0>2}h{:0>2}m{:0>2}s/{:0>2}h{:0>2}m, {}'.format(
-                    epoch, total_iter, total_speed, epoch_tl_h, epoch_tl_m, epoch_tl_s, total_tl_h, total_tl_m, msg))
+                tqdm.write(
+                    '[Epoch {}][Batch {}], {:.3f}/{:0>2}h{:0>2}m{:0>2}s/{:0>2}h{:0>2}m, {}'.format(
+                        epoch, total_iter, total_speed, epoch_tl_h, epoch_tl_m, epoch_tl_s,
+                        total_tl_h, total_tl_m, msg))
                 btic = time.time()
 
-            if cfg.TRAIN.STEPS_PER_EPOCH and i >= cfg.TRAIN.STEPS_PER_EPOCH:
-                break
-        tbar.close()
+            # if cfg.TRAIN.STEPS_PER_EPOCH and i >= cfg.TRAIN.STEPS_PER_EPOCH:
+            #     break
+        # tbar.close()
         msg = ','.join(['{}={:.3f}'.format(*metric.get()) for metric in metrics])
         logger.info('[Epoch {}] Training cost: {:.3f}s, {}'.format(
             epoch, (time.time() - tic), msg))
@@ -420,7 +445,7 @@ if __name__ == '__main__':
     # set up logger
     logger.set_logger_dir(args.logdir, 'd')
     logger.info("Config: ------------------------------------------\n" + \
-            pprint.pformat(cfg.to_dict(), indent=1, width=100, compact=True))
+                pprint.pformat(cfg.to_dict(), indent=1, width=100, compact=True))
 
     net = get_model(net_name, pretrained_base=True,
                     dtype='float16' if cfg.GENERAL.FP16 else 'float32')
